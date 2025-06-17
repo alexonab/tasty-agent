@@ -33,6 +33,7 @@ environment without affecting live positions.
 - **`get_account_balances`** - Get current cash balance, buying power, net liquidating value, and maintenance excess
   - Always returns fresh data from TastyTrade API
   - No parameters required
+  - In the test environment, buying power values are not provided by the API and default to the cash balance
 
 - **`get_current_positions`** - Get all open stock and option positions
   - Includes symbol, type, quantity, mark price, and current value
