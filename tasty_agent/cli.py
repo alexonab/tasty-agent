@@ -1,4 +1,5 @@
 import sys
+import os
 import keyring
 from getpass import getpass
 import click
@@ -32,7 +33,9 @@ def setup():
         keyring.set_password("tastytrade", "username", username)
         keyring.set_password("tastytrade", "password", password)
 
-        session = Session(username, password)
+        # Use the test environment when TASTYTRADE_IS_TEST is set to "true"
+        is_test = os.getenv("TASTYTRADE_IS_TEST", "false").lower() in ("true", "1", "yes")
+        session = Session(username, password, is_test=is_test)
         accounts = Account.get(session)
 
         if len(accounts) > 1:

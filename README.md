@@ -20,6 +20,12 @@ Or set environment variables:
 - `TASTYTRADE_USERNAME`
 - `TASTYTRADE_PASSWORD`
 - `TASTYTRADE_ACCOUNT_ID` (optional - uses first account if multiple)
+- `TASTYTRADE_IS_TEST` (optional - `true` for the test environment, `false` or
+  unset for live trading)
+
+By default the server connects to the live Tastytrade environment. Set the
+variable to `true` when you want to experiment safely using the test
+environment without affecting live positions.
 
 ## MCP Tools
 
