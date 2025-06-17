@@ -20,6 +20,12 @@ Or set environment variables:
 - `TASTYTRADE_USERNAME`
 - `TASTYTRADE_PASSWORD`
 - `TASTYTRADE_ACCOUNT_ID` (optional - uses first account if multiple)
+- `TASTYTRADE_IS_TEST` (optional - `true` for the test environment, `false` or
+  unset for live trading)
+
+By default the server connects to the live Tastytrade environment. Set the
+variable to `true` when you want to experiment safely using the test
+environment without affecting live positions.
 
 ## MCP Tools
 
@@ -27,6 +33,7 @@ Or set environment variables:
 - **`get_account_balances`** - Get current cash balance, buying power, net liquidating value, and maintenance excess
   - Always returns fresh data from TastyTrade API
   - No parameters required
+  - In the test environment, buying power values are not provided by the API and default to the cash balance
 
 - **`get_current_positions`** - Get all open stock and option positions
   - Includes symbol, type, quantity, mark price, and current value

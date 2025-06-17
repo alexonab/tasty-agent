@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 class ServerContext:
     session: Session | None
     account: Account | None
+    is_test: bool
 
 @asynccontextmanager
 async def lifespan(_server: FastMCP) -> AsyncIterator[ServerContext]:
@@ -49,7 +50,9 @@ async def lifespan(_server: FastMCP) -> AsyncIterator[ServerContext]:
             "TASTYTRADE_USERNAME and TASTYTRADE_PASSWORD environment variables."
         )
 
-    session = Session(username, password)
+    # Use the test environment when TASTYTRADE_IS_TEST is set to "true"
+    is_test = os.getenv("TASTYTRADE_IS_TEST", "false").lower() in ("true", "1", "yes")
+    session = Session(username, password, is_test=is_test)
     accounts = Account.get(session)
 
     if account_id:
@@ -63,7 +66,7 @@ async def lifespan(_server: FastMCP) -> AsyncIterator[ServerContext]:
         else:
             logger.info(f"Using Tastytrade account: {account.account_number}")
 
-    context = ServerContext(session=session, account=account)
+    context = ServerContext(session=session, account=account, is_test=is_test)
     logger.info("TastyTrade MCP server is ready to handle requests")
     yield context
 
@@ -75,11 +78,22 @@ async def get_account_balances(ctx: Context) -> str:
     """Get account cash balance, buying power, and net liquidating value."""
     context = ctx.request_context.lifespan_context
     balances = await context.account.a_get_balances(context.session)
+    cash = float(balances.cash_balance)
+    equity_bp = float(balances.equity_buying_power)
+    deriv_bp = float(balances.derivative_buying_power)
+
+    # Certification accounts may not return buying power; default to cash balance
+    if context.is_test:
+        if equity_bp == 0:
+            equity_bp = cash
+        if deriv_bp == 0:
+            deriv_bp = cash
+
     return (
         f"Account Balances:\n"
-        f"Cash Balance: ${float(balances.cash_balance):,.2f}\n"
-        f"Equity Buying Power: ${float(balances.equity_buying_power):,.2f}\n"
-        f"Derivative Buying Power: ${float(balances.derivative_buying_power):,.2f}\n"
+        f"Cash Balance: ${cash:,.2f}\n"
+        f"Equity Buying Power: ${equity_bp:,.2f}\n"
+        f"Derivative Buying Power: ${deriv_bp:,.2f}\n"
         f"Net Liquidating Value: ${float(balances.net_liquidating_value):,.2f}\n"
         f"Maintenance Excess: ${float(balances.maintenance_excess):,.2f}"
     )
