@@ -49,7 +49,9 @@ async def lifespan(_server: FastMCP) -> AsyncIterator[ServerContext]:
             "TASTYTRADE_USERNAME and TASTYTRADE_PASSWORD environment variables."
         )
 
-    session = Session(username, password)
+    # Use the test environment when TASTYTRADE_IS_TEST is set to "true"
+    is_test = os.getenv("TASTYTRADE_IS_TEST", "false").lower() in ("true", "1", "yes")
+    session = Session(username, password, is_test=is_test)
     accounts = Account.get(session)
 
     if account_id:
