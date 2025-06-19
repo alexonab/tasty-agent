@@ -6,6 +6,8 @@ from decimal import Decimal
 import keyring
 import logging
 import os
+
+from .utils import is_test_env
 from tabulate import tabulate
 from typing import Literal, AsyncIterator
 from zoneinfo import ZoneInfo
@@ -25,6 +27,7 @@ logger = logging.getLogger(__name__)
 class ServerContext:
     session: Session | None
     account: Account | None
+    is_test: bool
 
 @asynccontextmanager
 async def lifespan(_server: FastMCP) -> AsyncIterator[ServerContext]:
@@ -49,8 +52,9 @@ async def lifespan(_server: FastMCP) -> AsyncIterator[ServerContext]:
             "TASTYTRADE_USERNAME and TASTYTRADE_PASSWORD environment variables."
         )
 
-    # Use the test environment when TASTYTRADE_IS_TEST is set to "true"
-    is_test = os.getenv("TASTYTRADE_IS_TEST", "false").lower() in ("true", "1", "yes")
+
+    # Connect to the certification environment when configured
+    is_test = is_test_env()
     session = Session(username, password, is_test=is_test)
     accounts = Account.get(session)
 
@@ -65,7 +69,7 @@ async def lifespan(_server: FastMCP) -> AsyncIterator[ServerContext]:
         else:
             logger.info(f"Using Tastytrade account: {account.account_number}")
 
-    context = ServerContext(session=session, account=account)
+    context = ServerContext(session=session, account=account, is_test=is_test)
     logger.info("TastyTrade MCP server is ready to handle requests")
     yield context
 
@@ -77,11 +81,22 @@ async def get_account_balances(ctx: Context) -> str:
     """Get account cash balance, buying power, and net liquidating value."""
     context = ctx.request_context.lifespan_context
     balances = await context.account.a_get_balances(context.session)
+    cash = float(balances.cash_balance)
+    equity_bp = float(balances.equity_buying_power)
+    deriv_bp = float(balances.derivative_buying_power)
+
+    # Certification accounts may not return buying power; default to cash balance
+    if context.is_test:
+        if equity_bp == 0:
+            equity_bp = cash
+        if deriv_bp == 0:
+            deriv_bp = cash
+
     return (
         f"Account Balances:\n"
-        f"Cash Balance: ${float(balances.cash_balance):,.2f}\n"
-        f"Equity Buying Power: ${float(balances.equity_buying_power):,.2f}\n"
-        f"Derivative Buying Power: ${float(balances.derivative_buying_power):,.2f}\n"
+        f"Cash Balance: ${cash:,.2f}\n"
+        f"Equity Buying Power: ${equity_bp:,.2f}\n"
+        f"Derivative Buying Power: ${deriv_bp:,.2f}\n"
         f"Net Liquidating Value: ${float(balances.net_liquidating_value):,.2f}\n"
         f"Maintenance Excess: ${float(balances.maintenance_excess):,.2f}"
     )
@@ -196,9 +211,13 @@ async def place_trade(
     option_type: Literal["C", "P"] | None = None,
     expiration_date: str | None = None,
     order_price: float | None = None,
+    order_type: Literal["Limit", "Market"] = "Limit",
     dry_run: bool = False,
 ) -> str:
-    """Execute a stock/option trade."""
+    """Execute a stock/option trade.
+
+    Parameters marked with * are optional.
+    """
     context = ctx.request_context.lifespan_context
 
     exp_date = datetime.strptime(expiration_date, "%Y-%m-%d") if expiration_date else None
@@ -209,45 +228,66 @@ async def place_trade(
     if not instrument:
         raise ValueError(f"Could not create instrument for {underlying_symbol}")
 
-    bid_price, ask_price = await _get_quote(context.session, instrument.streamer_symbol)
+    limit_price: Decimal | None = None
+    if order_type == "Limit":
+        bid_price, ask_price = await _get_quote(context.session, instrument.streamer_symbol)
 
-    user_price = Decimal(str(order_price)) if order_price else None
+        user_price = Decimal(str(order_price)) if order_price else None
 
-    if user_price is not None:
-        if bid_price > Decimal(0) and ask_price > Decimal(0):
-            if user_price < bid_price:
-                logger.warning(f"Adjusted order price from ${user_price:.2f} to ${bid_price:.2f} (bid price)")
-                limit_price = bid_price
-            elif user_price > ask_price:
-                logger.warning(f"Adjusted order price from ${user_price:.2f} to ${ask_price:.2f} (ask price)")
-                limit_price = ask_price
+        if user_price is not None:
+            if bid_price > Decimal(0) and ask_price > Decimal(0):
+                if user_price < bid_price:
+                    logger.warning(
+                        f"Adjusted order price from ${user_price:.2f} to ${bid_price:.2f} (bid price)"
+                    )
+                    limit_price = bid_price
+                elif user_price > ask_price:
+                    logger.warning(
+                        f"Adjusted order price from ${user_price:.2f} to ${ask_price:.2f} (ask price)"
+                    )
+                    limit_price = ask_price
+                else:
+                    limit_price = user_price
             else:
                 limit_price = user_price
+            logger.info(
+                f"Using {'adjusted' if limit_price != user_price else 'user-provided'} order price: ${limit_price:.2f}"
+            )
         else:
-            limit_price = user_price
-        logger.info(f"Using {'adjusted' if limit_price != user_price else 'user-provided'} order price: ${limit_price:.2f}")
-    else:
-        if bid_price > Decimal(0) and ask_price > Decimal(0) and ask_price >= bid_price:
-            limit_price = ((bid_price + ask_price) / 2).quantize(Decimal('0.01'))
-            logger.info(f"Using mid-price: ${limit_price:.2f}")
-        else:
-            fallback_price = ask_price if action == "Buy to Open" else bid_price
-            if fallback_price > Decimal(0):
-                logger.warning(f"Using {'ask' if action == 'Buy to Open' else 'bid'} price: ${fallback_price:.2f}")
-                limit_price = fallback_price
+            if bid_price > Decimal(0) and ask_price > Decimal(0) and ask_price >= bid_price:
+                limit_price = ((bid_price + ask_price) / 2).quantize(Decimal("0.01"))
+                logger.info(f"Using mid-price: ${limit_price:.2f}")
             else:
-                raise ValueError(f"Cannot determine valid order price. Bid: {bid_price}, Ask: {ask_price}")
+                fallback_price = ask_price if action == "Buy to Open" else bid_price
+                if fallback_price > Decimal(0):
+                    logger.warning(
+                        f"Using {'ask' if action == 'Buy to Open' else 'bid'} price: ${fallback_price:.2f}"
+                    )
+                    limit_price = fallback_price
+                else:
+                    raise ValueError(
+                        f"Cannot determine valid order price. Bid: {bid_price}, Ask: {ask_price}"
+                    )
 
     order_action = OrderAction.BUY_TO_OPEN if action == "Buy to Open" else OrderAction.SELL_TO_CLOSE
 
-    order = NewOrder(
-        time_in_force=OrderTimeInForce.DAY,
-        order_type=OrderType.LIMIT,
-        legs=[instrument.build_leg(quantity, order_action)],
-        price=limit_price
-    )
+    if order_type == "Limit":
+        order = NewOrder(
+            time_in_force=OrderTimeInForce.DAY,
+            order_type=OrderType.LIMIT,
+            legs=[instrument.build_leg(quantity, order_action)],
+            price=limit_price,
+        )
+        price_desc = f"${limit_price:.2f}"
+    else:
+        order = NewOrder(
+            time_in_force=OrderTimeInForce.DAY,
+            order_type=OrderType.MARKET,
+            legs=[instrument.build_leg(quantity, order_action)],
+        )
+        price_desc = "market price"
 
-    logger.info(f"Placing order: {action} {quantity} {instrument.symbol} @ ${limit_price:.2f}")
+    logger.info(f"Placing order: {action} {quantity} {instrument.symbol} @ {price_desc}")
     response = await context.account.a_place_order(context.session, order, dry_run=dry_run)
 
     if response.errors:
@@ -255,7 +295,10 @@ async def place_trade(
         return f"Order placement failed:\n{error_msg}"
 
     order_id = "N/A - Dry Run" if dry_run else (response.order.id if response.order else "Unknown")
-    success_msg = f"Order placement successful: {action} {quantity} {instrument.symbol} @ ${limit_price:.2f} (ID: {order_id})"
+    success_msg = (
+        f"Order placement successful: {action} {quantity} {instrument.symbol} @ {price_desc}"
+        f" (ID: {order_id})"
+    )
 
     if response.warnings:
         success_msg += "\nWarnings:\n" + "\n".join(str(w) for w in response.warnings)

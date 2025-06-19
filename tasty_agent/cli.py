@@ -1,4 +1,5 @@
 import sys
+from .utils import is_test_env
 import os
 import keyring
 from getpass import getpass
@@ -33,10 +34,8 @@ def setup():
         keyring.set_password("tastytrade", "username", username)
         keyring.set_password("tastytrade", "password", password)
 
-        # Use the test environment when TASTYTRADE_IS_TEST is set to "true"
-        is_test = os.getenv("TASTYTRADE_IS_TEST", "false").lower() in ("true", "1", "yes")
-        session = Session(username, password, is_test=is_test)
-        accounts = Account.get(session)
+        # Connect to the certification environment when configured
+        session = Session(username, password, is_test=is_test_env())
 
         if len(accounts) > 1:
             table = Table(title="Available Accounts")
