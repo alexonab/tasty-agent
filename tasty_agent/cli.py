@@ -1,5 +1,6 @@
 import sys
 from .utils import is_test_env
+import os
 import keyring
 from getpass import getpass
 import click
@@ -35,7 +36,6 @@ def setup():
 
         # Connect to the certification environment when configured
         session = Session(username, password, is_test=is_test_env())
-        accounts = Account.get(session)
 
         if len(accounts) > 1:
             table = Table(title="Available Accounts")
@@ -72,4 +72,3 @@ def setup():
             except keyring.errors.PasswordDeleteError:
                 pass
         sys.exit(1)
-

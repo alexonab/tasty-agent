@@ -27,13 +27,6 @@ By default the server connects to the live Tastytrade environment. Set the
 variable to `true` when you want to experiment safely using the test
 environment without affecting live positions.
 
-You can also use the test environment programmatically by passing
-`is_test=True` when creating a Tastytrade `Session`:
-
-```python
-from tastytrade import Session
-session = Session('username', 'password', is_test=True)
-```
 
 ## MCP Tools
 

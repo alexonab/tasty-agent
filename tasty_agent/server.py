@@ -52,6 +52,7 @@ async def lifespan(_server: FastMCP) -> AsyncIterator[ServerContext]:
             "TASTYTRADE_USERNAME and TASTYTRADE_PASSWORD environment variables."
         )
 
+
     # Connect to the certification environment when configured
     is_test = is_test_env()
     session = Session(username, password, is_test=is_test)
