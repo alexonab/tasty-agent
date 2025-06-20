@@ -28,6 +28,14 @@ variable to `true` when you want to experiment safely using the test
 environment without affecting live positions.
 
 
+You can also use the test environment programmatically by passing
+`is_test=True` when creating a Tastytrade `Session`:
+
+```python
+from tastytrade import Session
+session = Session('username', 'password', is_test=True)
+```
+
 ## MCP Tools
 
 ### Account Information
@@ -69,6 +77,7 @@ environment without affecting live positions.
   - Time periods: 1d, 1m, 3m, 6m, 1y, all
   - Returns formatted table with dates sorted most recent first
   - Parameters: time_back (default: 1y)
+  - Gracefully handles missing data in the test environment
 
 - **`get_transaction_history`** - Detailed transaction history
   - Defaults to last 90 days if no start date provided
@@ -79,7 +88,7 @@ environment without affecting live positions.
 - **`get_metrics`** - Comprehensive market metrics for symbols
   - IV Rank, IV Percentile, Beta, Liquidity Rating, Lendability, Earnings dates
   - Supports multiple symbols in single request
-  - Parameters: symbols (list of strings)
+  - Parameters: symbols (comma-separated string or list of strings)
 
 - **`get_prices`** - Real-time bid/ask quotes via DXLink streaming
   - Supports both stocks and options

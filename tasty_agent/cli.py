@@ -37,6 +37,8 @@ def setup():
         # Connect to the certification environment when configured
         session = Session(username, password, is_test=is_test_env())
 
+        accounts = Account.get(session)
+
         if len(accounts) > 1:
             table = Table(title="Available Accounts")
             table.add_column("Index", justify="right", style="cyan")
@@ -72,3 +74,4 @@ def setup():
             except keyring.errors.PasswordDeleteError:
                 pass
         sys.exit(1)
+

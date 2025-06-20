@@ -52,7 +52,6 @@ async def lifespan(_server: FastMCP) -> AsyncIterator[ServerContext]:
             "TASTYTRADE_USERNAME and TASTYTRADE_PASSWORD environment variables."
         )
 
-
     # Connect to the certification environment when configured
     is_test = is_test_env()
     session = Session(username, password, is_test=is_test)
@@ -312,7 +311,14 @@ async def get_nlv_history(
 ) -> str:
     """Get Net Liquidating Value (NLV) history for the account."""
     context = ctx.request_context.lifespan_context
-    history = await context.account.a_get_net_liquidating_value_history(context.session, time_back=time_back)
+    try:
+        history = await context.account.a_get_net_liquidating_value_history(
+            context.session, time_back=time_back
+        )
+    except Exception as e:  # library may fail to parse empty JSON
+        logger.error("Failed to fetch NLV history: %s", e)
+        return "Unable to retrieve NLV history at this time."
+
     if not history:
         return "No history data available for the selected time period."
 
@@ -374,9 +380,11 @@ async def get_transaction_history(
 @mcp.tool()
 async def get_metrics(
     ctx: Context,
-    symbols: list[str]
+    symbols: list[str] | str
 ) -> str:
     """Get market metrics for symbols (IV Rank, Beta, Liquidity, Earnings)."""
+    if isinstance(symbols, str):
+        symbols = [s.strip() for s in symbols.split(',') if s.strip()]
     if not symbols:
         raise ValueError("No symbols provided.")
 
@@ -457,13 +465,12 @@ async def cancel_order(
 
     context = ctx.request_context.lifespan_context
     logger.info(f"Attempting to cancel order. Dry run: {dry_run}")
-    response = await context.account.a_cancel_order(context.session, int(order_id), dry_run=dry_run)
 
     if dry_run:
-        status_msg = f" (Simulated status: {response.order.status.value})" if response and response.order else ""
-        return f"Dry run: Successfully processed cancellation request for order ID {order_id}{status_msg}."
+        return f"Dry run: Cancellation request for order ID {order_id} not sent."
 
-    if response and response.order and response.order.status in [OrderStatus.CANCELLED, OrderStatus.REPLACED]:
+    response = await context.account.cancel_order(context.session, int(order_id))
+    if response and hasattr(response, "order") and response.order and response.order.status in [OrderStatus.CANCELLED, OrderStatus.REPLACED]:
         return f"Successfully cancelled order ID {order_id}. New status: {response.order.status.value}"
     elif response and response.order:
         return f"Order ID {order_id} processed but current status is {response.order.status.value}. Expected Cancelled."
@@ -513,13 +520,23 @@ async def modify_order(
         price=updated_price
     )
 
-    response = await context.account.a_replace_order(context.session, int(order_id), modified_order, dry_run=dry_run)
+    if dry_run:
+        return (
+            f"Dry run: Would modify order ID {order_id} to quantity {updated_quantity}"
+            f" at ${float(updated_price):.2f}."
+        )
+
+    response = await context.account.a_replace_order(
+        context.session,
+        int(order_id),
+        modified_order,
+    )
 
     if response.errors:
         error_msg = "\n".join(str(e) for e in response.errors)
         raise ValueError(f"Failed to modify order ID {order_id}:\n{error_msg}")
 
-    new_order_id = "N/A - Dry Run" if dry_run else (response.order.id if response.order else "Unknown")
+    new_order_id = response.order.id if response.order else "Unknown"
     success_msg = f"Order ID {order_id} modified successfully. New Order ID: {new_order_id}."
 
     if response.warnings:
