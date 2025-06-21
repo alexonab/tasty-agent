@@ -380,11 +380,14 @@ async def get_transaction_history(
 @mcp.tool()
 async def get_metrics(
     ctx: Context,
-    symbols: list[str] | str
+    symbols: list[str] | str,
 ) -> str:
     """Get market metrics for symbols (IV Rank, Beta, Liquidity, Earnings)."""
     if isinstance(symbols, str):
-        symbols = [s.strip() for s in symbols.split(',') if s.strip()]
+        cleaned = symbols.replace("\n", " ").strip()
+        if cleaned.startswith("[") and cleaned.endswith("]"):
+            cleaned = cleaned[1:-1]
+        symbols = [s.strip().strip("'\"") for s in cleaned.split(',') if s.strip()]
     if not symbols:
         raise ValueError("No symbols provided.")
 
@@ -469,7 +472,16 @@ async def cancel_order(
     if dry_run:
         return f"Dry run: Cancellation request for order ID {order_id} not sent."
 
-    response = await context.account.cancel_order(context.session, int(order_id))
+    cancel_method = getattr(context.account, "a_cancel_order", None)
+    if cancel_method:
+        response = await cancel_method(context.session, int(order_id))
+    else:
+        cancel_method = getattr(context.account, "cancel_order")
+        result = cancel_method(context.session, int(order_id))
+        if asyncio.iscoroutine(result):
+            response = await result
+        else:
+            response = result
     if response and hasattr(response, "order") and response.order and response.order.status in [OrderStatus.CANCELLED, OrderStatus.REPLACED]:
         return f"Successfully cancelled order ID {order_id}. New status: {response.order.status.value}"
     elif response and response.order:
