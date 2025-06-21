@@ -247,12 +247,51 @@ def test_get_live_orders(server):
 def test_cancel_order(server):
     response = MagicMock(order=MagicMock(status=server.OrderStatus.CANCELLED))
     account = MagicMock()
-    account.cancel_order = AsyncMock(return_value=response)
+    account.a_cancel_order = AsyncMock(return_value=response)
     ctx = make_ctx(server, account)
 
     result = asyncio.run(server.cancel_order(ctx, '12345'))
     assert 'Successfully cancelled' in result
+    account.a_cancel_order.assert_awaited()
+
+
+def test_cancel_order_dry_run(server):
+    account = MagicMock()
+    account.a_cancel_order = AsyncMock()
+    ctx = make_ctx(server, account)
+
+    result = asyncio.run(server.cancel_order(ctx, '999', dry_run=True))
+    assert 'Dry run' in result
+    account.a_cancel_order.assert_not_called()
+
+
+def test_cancel_order_fallback_to_sync(server):
+    response = MagicMock(order=MagicMock(status=server.OrderStatus.CANCELLED))
+    account = MagicMock()
+    account.cancel_order = AsyncMock(return_value=response)
+    account.a_cancel_order = None
+    ctx = make_ctx(server, account)
+
+    result = asyncio.run(server.cancel_order(ctx, '55555'))
+    assert 'Successfully cancelled' in result
     account.cancel_order.assert_awaited()
+
+
+def test_cancel_order_sync_method(server):
+    """Ensure sync cancel_order works when no async method is available."""
+    response = MagicMock(order=MagicMock(status=server.OrderStatus.CANCELLED))
+
+    def sync_cancel(session, order_id):
+        return response
+
+    account = MagicMock()
+    account.cancel_order = MagicMock(side_effect=sync_cancel)
+    account.a_cancel_order = None
+    ctx = make_ctx(server, account)
+
+    result = asyncio.run(server.cancel_order(ctx, '444'))
+    assert 'Successfully cancelled' in result
+    account.cancel_order.assert_called_once_with(ctx.request_context.lifespan_context.session, 444)
 
 
 def test_modify_order_quantity(server):
@@ -378,6 +417,49 @@ def test_get_metrics(server):
     result = asyncio.run(server.get_metrics(ctx, ['TSLA']))
     assert 'Market Metrics' in result
     server.metrics.a_get_market_metrics.assert_awaited()
+
+
+def test_get_metrics_bracket_string(server):
+    metric = MagicMock(
+        symbol='SPY',
+        implied_volatility_index_rank=0.3,
+        implied_volatility_percentile=0.4,
+        beta=0.9,
+        liquidity_rating='High',
+        lendability='Good',
+        earnings=None,
+    )
+    server.metrics.a_get_market_metrics.return_value = [metric]
+
+    account = MagicMock()
+    ctx = make_ctx(server, account)
+
+    result = asyncio.run(server.get_metrics(ctx, "[SPY]"))
+    assert 'Market Metrics' in result
+    server.metrics.a_get_market_metrics.assert_awaited_with(ctx.request_context.lifespan_context.session, ['SPY'])
+
+
+def test_get_metrics_multiline_string(server):
+    metric = MagicMock(
+        symbol='SPY',
+        implied_volatility_index_rank=0.2,
+        implied_volatility_percentile=0.3,
+        beta=0.8,
+        liquidity_rating='High',
+        lendability='Good',
+        earnings=None,
+    )
+    server.metrics.a_get_market_metrics.return_value = [metric, metric]
+
+    account = MagicMock()
+    ctx = make_ctx(server, account)
+
+    result = asyncio.run(server.get_metrics(ctx, "SPY,\nAAPL"))
+    assert 'Market Metrics' in result
+    server.metrics.a_get_market_metrics.assert_awaited_with(
+        ctx.request_context.lifespan_context.session,
+        ['SPY', 'AAPL']
+    )
 
 
 def test_check_market_status(server):
